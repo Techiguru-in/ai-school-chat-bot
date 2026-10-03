@@ -332,10 +332,10 @@
     <!-- Student API Notice Banner -->
     <div class="api-banner" role="alert">
       <div>
-        <strong>Notice for Students:</strong> To enable live AI answers, open <code>script.js</code> and insert your free Groq API key into <code>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</code>.
+        <strong>AI Assistant:</strong> Connected to Groq AI.
       </div>
       <div style="font-size: 12px; opacity: 0.9;">
-        Note: Frontend keys are visible in the browser source. Use this setup for homework, experiments, and learning purposes.
+        For production, keep your Groq API key on a backend server and never expose it in frontend source code.
       </div>
     </div>
 
@@ -423,29 +423,44 @@ Try typing a question below or click any example question!</div>
     </section>
   </div>
 
-  <!-- Link to external Vanilla JavaScript file -->
-  <script src="script.js"></script>
-  <!-- Inline interactive demo script so the canvas preview works out of the box -->
   <script>
-    (function() {
-      const form = document.getElementById('chatForm');
-      const input = document.getElementById('userInput');
-      const messagesContainer = document.getElementById('chatMessages');
-      const typingIndicator = document.getElementById('typingIndicator');
-      const clearBtn = document.getElementById('clearChatBtn');
-      const exampleButtons = document.querySelectorAll('.example-btn');
-      const sendBtn = document.getElementById('sendBtn');
+    (() => {
+      // IMPORTANT:
+      // This frontend demo uses the Groq key already configured in the original file.
+      // For production, move this key to your backend/server environment variable.
+      const GROQ_API_KEY = "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";
+      const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+      const GROQ_MODEL = "openai/gpt-oss-20b";
 
-      // Fill input when example is clicked
-      exampleButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
+      const form = document.getElementById("chatForm");
+      const input = document.getElementById("userInput");
+      const messagesContainer = document.getElementById("chatMessages");
+      const typingIndicator = document.getElementById("typingIndicator");
+      const clearBtn = document.getElementById("clearChatBtn");
+      const exampleButtons = document.querySelectorAll(".example-btn");
+      const sendBtn = document.getElementById("sendBtn");
+
+      // Keep conversation context for the current browser session.
+      const conversation = [
+        {
+          role: "system",
+          content:
+            "You are a friendly school AI teacher. Explain concepts clearly and simply for students. " +
+            "Support Hindi and English. Use age-appropriate language. Show step-by-step solutions for math. " +
+            "Do not provide unsafe instructions. If a question is ambiguous, ask a short clarification."
+        }
+      ];
+
+      exampleButtons.forEach((btn) => {
+        btn.addEventListener("click", () => {
           input.value = btn.textContent.trim();
           input.focus();
         });
       });
 
-      // Clear chat
-      clearBtn.addEventListener('click', () => {
+      clearBtn.addEventListener("click", () => {
+        conversation.length = 1;
+
         messagesContainer.innerHTML = `
           <div class="message assistant">
             <span class="sender-name">AI Teacher</span>
@@ -456,49 +471,128 @@ Try typing a question below or click any example question!</div>
             <span>AI Teacher is thinking...</span>
           </div>
         `;
+
+        input.focus();
       });
 
       function addMessage(text, role, isError = false) {
-        const msgDiv = document.createElement('div');
-        msgDiv.className = `message ${role} ${isError ? 'error' : ''}`;
-        
-        const senderSpan = document.createElement('span');
-        senderSpan.className = 'sender-name';
-        senderSpan.textContent = role === 'user' ? 'Student' : 'AI Teacher';
-        
-        const bubbleDiv = document.createElement('div');
-        bubbleDiv.className = 'bubble';
+        const msgDiv = document.createElement("div");
+        msgDiv.className = `message ${role}${isError ? " error" : ""}`;
+
+        const senderSpan = document.createElement("span");
+        senderSpan.className = "sender-name";
+        senderSpan.textContent = role === "user" ? "Student" : "AI Teacher";
+
+        const bubbleDiv = document.createElement("div");
+        bubbleDiv.className = "bubble";
         bubbleDiv.textContent = text;
-        
+
         msgDiv.appendChild(senderSpan);
         msgDiv.appendChild(bubbleDiv);
-        
-        const indicator = document.getElementById('typingIndicator');
-        messagesContainer.insertBefore(msgDiv, indicator);
+
+        const indicator = document.getElementById("typingIndicator");
+        if (indicator) {
+          messagesContainer.insertBefore(msgDiv, indicator);
+        } else {
+          messagesContainer.appendChild(msgDiv);
+        }
+
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
       }
 
-      form.addEventListener('submit', (e) => {
-        e.preventDefault();
-        const text = input.value.trim();
-        if (!text) return;
+      async function askGroq(userText) {
+        conversation.push({
+          role: "user",
+          content: userText
+        });
 
-        addMessage(text, 'user');
-        input.value = '';
+        const response = await fetch(GROQ_API_URL, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${GROQ_API_KEY}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: GROQ_MODEL,
+            messages: conversation,
+            temperature: 0.4,
+            max_completion_tokens: 1024
+          })
+        });
+
+        let data = null;
+        try {
+          data = await response.json();
+        } catch (_) {
+          // Keep the original HTTP status available for the error below.
+        }
+
+        if (!response.ok) {
+          const apiMessage =
+            data?.error?.message ||
+            data?.message ||
+            `Groq API request failed with HTTP ${response.status}.`;
+
+          throw new Error(apiMessage);
+        }
+
+        const answer = data?.choices?.[0]?.message?.content?.trim();
+
+        if (!answer) {
+          throw new Error("Groq returned an empty response.");
+        }
+
+        conversation.push({
+          role: "assistant",
+          content: answer
+        });
+
+        return answer;
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const text = input.value.trim();
+        if (!text || sendBtn.disabled) return;
+
+        addMessage(text, "user");
+        input.value = "";
         sendBtn.disabled = true;
 
-        const indicator = document.getElementById('typingIndicator');
-        if (indicator) indicator.style.display = 'flex';
+        const indicator = document.getElementById("typingIndicator");
+        if (indicator) indicator.style.display = "flex";
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
-        setTimeout(() => {
-          if (indicator) indicator.style.display = 'none';
-          sendBtn.disabled = false;
+        try {
+          const answer = await askGroq(text);
+          addMessage(answer, "assistant");
+        } catch (error) {
+          console.error("Groq API error:", error);
+
+          // Remove the failed user turn so a temporary API error
+          // does not pollute the next request's conversation history.
+          if (
+            conversation.length > 1 &&
+            conversation[conversation.length - 1].role === "user" &&
+            conversation[conversation.length - 1].content === text
+          ) {
+            conversation.pop();
+          }
+
           addMessage(
-            "Great question! To get live AI answers directly from Groq, open script.js and add your free Groq API key into GROQ_API_KEY. Until then, you can test the layout, clear button, and question examples!",
-            'assistant'
+            `Sorry, I could not get an answer from Groq.\n\n${error.message}\n\nPlease check your API key, browser console, network connection, and Groq account limits.`,
+            "assistant",
+            true
           );
-        }, 800);
+        } finally {
+          const currentIndicator = document.getElementById("typingIndicator");
+          if (currentIndicator) currentIndicator.style.display = "none";
+
+          sendBtn.disabled = false;
+          input.focus();
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
       });
     })();
   </script>
